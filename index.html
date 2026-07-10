@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f1a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>CamQuest — AR Camera Battle</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- TensorFlow.js + COCO-SSD for on-device person detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+</head>
+<body>
+
+  <!-- ============ MAIN MENU ============ -->
+  <section id="screen-menu" class="screen active">
+    <div class="menu-bg"></div>
+    <div class="menu-content">
+      <div class="logo">
+        <span class="logo-cam">CAM</span><span class="logo-quest">QUEST</span>
+        <div class="logo-sub">AR CAMERA BATTLE</div>
+      </div>
+
+      <nav class="menu-buttons">
+        <button class="btn btn-primary" data-goto="screen-modes">
+          <span class="btn-icon">🎯</span> PLAY
+        </button>
+        <button class="btn btn-secondary" data-goto="screen-showdown-setup">
+          <span class="btn-icon">🤠</span> SHOWDOWN <span class="tag">2P</span>
+        </button>
+        <button class="btn btn-ghost" data-goto="screen-settings">
+          <span class="btn-icon">⚙️</span> SETTINGS
+        </button>
+        <button class="btn btn-ghost" data-goto="screen-help">
+          <span class="btn-icon">❓</span> HOW TO PLAY
+        </button>
+      </nav>
+
+      <div class="menu-footer">MVP · point your camera at people &amp; play</div>
+    </div>
+  </section>
+
+  <!-- ============ MODE SELECT ============ -->
+  <section id="screen-modes" class="screen">
+    <header class="topbar">
+      <button class="btn-back" data-goto="screen-menu">‹</button>
+      <h2>CHOOSE MODE</h2>
+    </header>
+    <div class="cards">
+      <button class="card card-zombie" data-mode="zombie">
+        <div class="card-emoji">🧟</div>
+        <div class="card-title">Zombie Outbreak</div>
+        <div class="card-desc">Everyone on camera turns undead. Clear the horde.</div>
+      </button>
+      <button class="card card-egypt" data-mode="egypt">
+        <div class="card-emoji">🏺</div>
+        <div class="card-title">Pharaoh's Curse</div>
+        <div class="card-desc">Cursed mummies rise among ancient ruins.</div>
+      </button>
+      <button class="card card-space" data-mode="space">
+        <div class="card-emoji">👾</div>
+        <div class="card-title">Alien Invasion</div>
+        <div class="card-desc">Invaders beam down. Defend your sector.</div>
+      </button>
+      <button class="card card-sea" data-mode="sea">
+        <div class="card-emoji">🦈</div>
+        <div class="card-title">Shark Waters</div>
+        <div class="card-desc">You're in the deep. Sharks are circling.</div>
+      </button>
+    </div>
+    <div class="mode-note">💡 Background theme can be toggled off in Settings</div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="screen-settings" class="screen">
+    <header class="topbar">
+      <button class="btn-back" data-goto="screen-menu">‹</button>
+      <h2>SETTINGS</h2>
+    </header>
+    <div class="settings-list">
+      <div class="setting">
+        <label>Monster respawn time</label>
+        <div class="setting-control">
+          <input type="range" id="set-respawn" min="10" max="300" step="10" />
+          <span class="setting-value" id="set-respawn-val">30s</span>
+        </div>
+      </div>
+      <div class="setting">
+        <label>Background theme</label>
+        <div class="setting-control">
+          <button class="toggle" id="set-theme" aria-pressed="true"><span></span></button>
+          <span class="setting-hint">Off = monsters on plain camera feed</span>
+        </div>
+      </div>
+      <div class="setting">
+        <label>Monster health</label>
+        <div class="setting-control seg" id="set-hp">
+          <button data-v="2">Easy</button>
+          <button data-v="4" class="on">Normal</button>
+          <button data-v="7">Hard</button>
+        </div>
+      </div>
+      <div class="setting">
+        <label>Sound effects</label>
+        <div class="setting-control">
+          <button class="toggle" id="set-sound" aria-pressed="true"><span></span></button>
+        </div>
+      </div>
+      <div class="setting">
+        <label>Vibration (haptics)</label>
+        <div class="setting-control">
+          <button class="toggle" id="set-haptics" aria-pressed="true"><span></span></button>
+        </div>
+      </div>
+      <div class="setting">
+        <label>Round length</label>
+        <div class="setting-control">
+          <input type="range" id="set-round" min="60" max="600" step="30" />
+          <span class="setting-value" id="set-round-val">3m</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HELP ============ -->
+  <section id="screen-help" class="screen">
+    <header class="topbar">
+      <button class="btn-back" data-goto="screen-menu">‹</button>
+      <h2>HOW TO PLAY</h2>
+    </header>
+    <div class="help-body">
+      <div class="help-item"><b>1 · Pick a mode</b><p>Zombies, mummies, aliens or sharks — each with its own world theme.</p></div>
+      <div class="help-item"><b>2 · Point your camera at people</b><p>Anyone the camera sees becomes a monster in the game. Move around to hunt!</p></div>
+      <div class="help-item"><b>3 · Tap to shoot</b><p>Tap the monster to hit it. Empty clip? Tap the RELOAD button. Headshots near the top score extra.</p></div>
+      <div class="help-item"><b>4 · Respawns</b><p>Downed monsters rise again after the respawn timer (change it in Settings).</p></div>
+      <div class="help-item"><b>🤠 Showdown</b><p>2 players, 1 phone: wait for DRAW… fastest trigger finger wins. Group multiplayer over Wi‑Fi is on the roadmap.</p></div>
+      <div class="help-item"><b>🖥️ No camera?</b><p>The game falls back to Target Practice with simulated monsters so you can still try it.</p></div>
+    </div>
+  </section>
+
+  <!-- ============ GAME ============ -->
+  <section id="screen-game" class="screen">
+    <video id="cam" playsinline autoplay muted></video>
+    <canvas id="fx-canvas"></canvas>
+    <canvas id="game-canvas"></canvas>
+
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <div id="loading-text">Summoning monsters…</div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud" class="hud hidden">
+      <div class="hud-top">
+        <button id="btn-exit" class="hud-btn">✕</button>
+        <div class="hud-score"><span id="hud-score">0</span><small>SCORE</small></div>
+        <div class="hud-timer" id="hud-timer">3:00</div>
+      </div>
+      <div class="hud-bottom">
+        <div class="hud-ammo" id="hud-ammo"></div>
+        <button id="btn-reload" class="hud-reload">RELOAD</button>
+      </div>
+      <div class="crosshair"></div>
+    </div>
+
+    <!-- Round over -->
+    <div id="gameover" class="overlay hidden">
+      <div class="panel">
+        <h2 id="go-title">ROUND OVER</h2>
+        <div class="go-stats">
+          <div><span id="go-score">0</span><small>score</small></div>
+          <div><span id="go-kills">0</span><small>eliminations</small></div>
+          <div><span id="go-acc">0%</span><small>accuracy</small></div>
+        </div>
+        <button class="btn btn-primary" id="btn-again">PLAY AGAIN</button>
+        <button class="btn btn-ghost" data-goto="screen-menu" data-stopgame="1">MAIN MENU</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SHOWDOWN SETUP ============ -->
+  <section id="screen-showdown-setup" class="screen">
+    <header class="topbar">
+      <button class="btn-back" data-goto="screen-menu">‹</button>
+      <h2>🤠 SHOWDOWN</h2>
+    </header>
+    <div class="showdown-intro">
+      <p class="sd-tag">2 PLAYERS · 1 PHONE</p>
+      <p>Hold the phone between you. When <b>DRAW!</b> flashes, hit your button first. First to <b>3 wins</b> takes the duel.</p>
+      <p class="sd-warn">⚠️ Draw too early and you lose the round!</p>
+      <button class="btn btn-primary" id="btn-showdown-start">START DUEL</button>
+      <p class="sd-roadmap">📡 Same‑WiFi group battles (laser tag) — coming next</p>
+    </div>
+  </section>
+
+  <!-- ============ SHOWDOWN GAME ============ -->
+  <section id="screen-showdown" class="screen">
+    <div class="sd-arena" id="sd-arena">
+      <button class="sd-pad sd-pad-top" id="sd-p2"><span>🤠 P2</span></button>
+      <div class="sd-center" id="sd-center">READY…</div>
+      <button class="sd-pad sd-pad-bottom" id="sd-p1"><span>🤠 P1</span></button>
+      <div class="sd-score" id="sd-score">0 — 0</div>
+      <button class="hud-btn sd-exit" id="sd-exit">✕</button>
+    </div>
+  </section>
+
+  <script src="js/audio.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/themes.js"></script>
+  <script src="js/tracker.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/showdown.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
