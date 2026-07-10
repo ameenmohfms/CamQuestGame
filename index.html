@@ -10,9 +10,10 @@
   <title>CamQuest — AR Camera Battle</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="css/style.css" />
-  <!-- TensorFlow.js + COCO-SSD for on-device person detection -->
+  <!-- TensorFlow.js + COCO-SSD (person boxes) + body segmentation (person pixels) -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js"></script>
 </head>
 <body>
 
@@ -153,6 +154,19 @@
       <div id="loading-text">Summoning monsters…</div>
     </div>
 
+    <!-- Detection failed but camera works -->
+    <div id="cam-error" class="overlay hidden">
+      <div class="panel">
+        <h2>MONSTER AI FAILED</h2>
+        <p class="panel-text" id="cam-error-msg">Couldn't load the person-detection model. Check your connection and retry.</p>
+        <button class="btn btn-primary" id="btn-retry-detect">RETRY</button>
+        <button class="btn btn-secondary" id="btn-practice">🎯 TARGET PRACTICE</button>
+        <button class="btn btn-ghost" data-goto="screen-menu" data-stopgame="1">MAIN MENU</button>
+      </div>
+    </div>
+
+    <div id="practice-badge" class="practice-badge hidden">🎯 TARGET PRACTICE — simulated monsters</div>
+
     <!-- HUD -->
     <div id="hud" class="hud hidden">
       <div class="hud-top">
@@ -211,6 +225,7 @@
   <script src="js/audio.js"></script>
   <script src="js/settings.js"></script>
   <script src="js/themes.js"></script>
+  <script src="js/monster-art.js"></script>
   <script src="js/tracker.js"></script>
   <script src="js/game.js"></script>
   <script src="js/showdown.js"></script>

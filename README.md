@@ -25,8 +25,9 @@ Open `http://localhost:8000` on your computer, or use a tunnel (e.g. `npx localt
 
 | Feature | Status |
 |---|---|
-| Camera feed with live **person detection** (on-device AI, TensorFlow.js COCO-SSD) | ✅ |
-| People on camera rendered as **monsters** with HP bars, hit flashes, death FX | ✅ |
+| Camera feed with live **person detection + body segmentation** (on-device AI) | ✅ |
+| Every captured person **becomes the monster**: their own silhouette is cut out, recolored with monster skin, and dressed with glowing eyes, jagged mouths, bandages, fins, antennae… | ✅ |
+| HP bars, hit flashes, death FX, respawn countdown rings | ✅ |
 | **4 modes**: Zombie Outbreak 🧟 · Pharaoh's Curse 🏺 · Alien Invasion 👾 · Shark Waters 🦈 | ✅ |
 | **World themes** per mode — Egypt sand + pyramids, deep space starfield, undersea light rays — as camera grading + animated overlays | ✅ |
 | **Theme off switch** — keep monsters on the plain camera feed | ✅ |
@@ -62,16 +63,18 @@ index.html
     └── showdown.js    — 2-player quick-draw duel
 ```
 
-- **Detection**: TensorFlow.js + COCO-SSD (`lite_mobilenet_v2`) runs fully on-device — no video ever leaves the phone. Detection runs ~8×/s; rendering interpolates at 60fps so monsters track smoothly.
+- **Detection**: TensorFlow.js + COCO-SSD (`lite_mobilenet_v2`) finds people, and MediaPipe SelfieSegmentation extracts their exact silhouette — all on-device, no video ever leaves the phone. Detection runs ~8×/s; rendering interpolates at 60fps so monsters track smoothly.
+- **Monster-ification** (`js/monster-art.js` + `drawPersonMonster` in `game.js`): the person's own pixels are masked out with the segmentation mask, tinted with the theme's monster skin, shaded, then procedural features (eyes, mouth, bandages, fin, antennae) are drawn onto their body. The person *is* the monster.
 - **Tracking**: simple nearest-center matcher gives each detected person a stable ID, which is what makes per-person HP and respawn timers possible.
 - **Themes**: a CSS filter grades the camera feed + a canvas layer draws animated set-dressing behind the monsters.
+- **No fake monsters**: simulated targets only appear in the clearly-labeled Target Practice mode (no camera available), and a failed AI load shows an error with Retry instead of silently faking it.
 
 ## 🗺️ Roadmap (post-MVP)
 
 1. **Same-WiFi group multiplayer** — WebRTC (PeerJS) rooms with a join code: laser-tag scoring, shared monster kills, versus showdown across phones.
 2. **Pose-based gestures** — reload by physically ducking, melee by swinging the phone (device motion API is already available).
-3. Better monster art — animated sprites/3D (three.js) anchored to detected bodies, WebXR where supported.
-4. Segmentation-based themes (BodyPix/SelfieSegmentation) so backgrounds are *replaced*, not just graded.
+3. Even richer monster art — pose estimation for limb-aware features, 3D (three.js) anchors, WebXR where supported.
+4. Full background *replacement* using the segmentation mask (invert it: keep people, swap the world).
 5. Power-ups, waves, boss monsters, leaderboards.
 
 ## 📱 Requirements

@@ -34,8 +34,7 @@
 
   // play again keeps the same mode
   document.getElementById("btn-again").addEventListener("click", () => {
-    const modeKey = Object.keys(THEMES).find((k) => THEMES[k] === Game.lastMode) || "zombie";
-    Game.start(modeKey);
+    Game.start(Game.lastModeKey);
   });
 
   // showdown

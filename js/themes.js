@@ -5,7 +5,6 @@
 const THEMES = {
   zombie: {
     name: "Zombie Outbreak",
-    monster: "🧟",
     monsterName: "Zombie",
     glow: "rgba(66, 245, 123, 0.85)",
     camFilter: "saturate(0.55) contrast(1.15) sepia(0.25) hue-rotate(50deg)",
@@ -13,11 +12,16 @@ const THEMES = {
     particles: { emoji: null, color: "rgba(160, 255, 170, 0.5)", count: 26, rise: true }, // toxic motes
     horizon: null,
     fog: "rgba(70, 100, 70, 0.16)",
+    // how the captured person is monster-ified
+    skinTint: "rgba(72, 170, 62, 0.5)",
+    skinShade: "rgba(15, 50, 12, 0.35)",
+    eye: { color: "#aaff4d", style: "round" },
+    mouth: "jagged",
+    extras: "scars",
+    demoBody: ["#5a9c42", "#2d5722"],
   },
   egypt: {
     name: "Pharaoh's Curse",
-    monster: "🧟‍♂️",
-    monsterEmblem: "𓂀",
     monsterName: "Mummy",
     glow: "rgba(255, 201, 77, 0.9)",
     camFilter: "sepia(0.65) saturate(1.3) contrast(1.1) brightness(1.05)",
@@ -25,10 +29,15 @@ const THEMES = {
     particles: { emoji: null, color: "rgba(255, 220, 150, 0.55)", count: 40, rise: false }, // drifting sand
     horizon: "pyramids",
     fog: "rgba(220, 180, 100, 0.12)",
+    skinTint: "rgba(195, 165, 100, 0.5)",
+    skinShade: "rgba(80, 60, 20, 0.3)",
+    eye: { color: "#ffd24d", style: "round" },
+    mouth: "stitch",
+    extras: "bandages",
+    demoBody: ["#c8a866", "#8a713d"],
   },
   space: {
     name: "Alien Invasion",
-    monster: "👾",
     monsterName: "Alien",
     glow: "rgba(170, 120, 255, 0.9)",
     camFilter: "saturate(1.2) contrast(1.25) brightness(0.8) hue-rotate(200deg)",
@@ -36,10 +45,15 @@ const THEMES = {
     particles: { emoji: null, color: "rgba(255, 255, 255, 0.8)", count: 60, rise: false, twinkle: true }, // stars
     horizon: "planets",
     fog: null,
+    skinTint: "rgba(135, 95, 225, 0.5)",
+    skinShade: "rgba(40, 20, 90, 0.35)",
+    eye: { color: "#e9d5ff", style: "almond" },
+    mouth: "small",
+    extras: "antennae",
+    demoBody: ["#8a6fd8", "#4a3585"],
   },
   sea: {
     name: "Shark Waters",
-    monster: "🦈",
     monsterName: "Shark",
     glow: "rgba(0, 210, 255, 0.9)",
     camFilter: "saturate(1.15) contrast(1.05) brightness(0.9) hue-rotate(160deg)",
@@ -47,6 +61,12 @@ const THEMES = {
     particles: { emoji: null, color: "rgba(200, 240, 255, 0.6)", count: 30, rise: true, bubble: true },
     horizon: "rays",
     fog: "rgba(0, 60, 100, 0.15)",
+    skinTint: "rgba(105, 145, 175, 0.55)",
+    skinShade: "rgba(20, 50, 75, 0.35)",
+    eye: { color: "#d8f4ff", style: "round" },
+    mouth: "teeth",
+    extras: "fin",
+    demoBody: ["#6f93a8", "#3d5e73"],
   },
 };
 

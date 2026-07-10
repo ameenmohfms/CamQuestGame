@@ -1,4 +1,8 @@
-/* CamQuest — core game: camera, person detection, monsters, shooting. */
+/* CamQuest — core game: camera, person detection + segmentation, monsters, shooting.
+   Every person the camera captures IS a monster: their own pixels are cut out
+   (body segmentation), recolored with the theme's monster skin, and dressed
+   with procedural features (MonsterArt). No random monsters — Target Practice
+   with simulated bodies only runs when there is no camera, clearly labeled. */
 
 const Game = (() => {
   // DOM
@@ -14,6 +18,8 @@ const Game = (() => {
   const ammoEl = document.getElementById("hud-ammo");
   const reloadBtn = document.getElementById("btn-reload");
   const gameoverEl = document.getElementById("gameover");
+  const camErrorEl = document.getElementById("cam-error");
+  const practiceBadge = document.getElementById("practice-badge");
 
   const ambience = new Ambience(fxCanvas);
   const tracker = new PersonTracker();
@@ -21,13 +27,24 @@ const Game = (() => {
   const CLIP_SIZE = 8;
   const RELOAD_MS = 1000;
 
-  let model = null;          // coco-ssd, loaded once
+  let model = null;            // coco-ssd person boxes (loaded once)
   let modelLoading = null;
+  let segmenter = null;        // selfie segmentation → person pixel mask
+  let segLoading = null;
   let stream = null;
   let running = false;
   let rafId = 0;
   let theme = THEMES.zombie;
-  let demoMode = false;      // no camera/model → simulated targets
+  let lastModeKey = "zombie";
+  let demoMode = false;
+
+  // person-pixel mask, refreshed by the detection loop
+  const maskCanvas = document.createElement("canvas");
+  const maskCtx = maskCanvas.getContext("2d");
+  let maskFresh = 0;
+  // scratch canvas for building each monster's tinted cutout
+  const cutCanvas = document.createElement("canvas");
+  const cutCtx = cutCanvas.getContext("2d");
 
   const state = {
     score: 0, kills: 0, shots: 0, hits: 0,
@@ -35,17 +52,20 @@ const Game = (() => {
     endsAt: 0, lastFrame: 0, elapsed: 0,
   };
 
-  let effects = [];          // muzzle rings, explosions, score popups
+  let effects = [];
   let demoTargets = [];
 
   /* ---------- boot ---------- */
 
   async function start(modeKey) {
+    lastModeKey = modeKey;
     theme = THEMES[modeKey] || THEMES.zombie;
     demoMode = false;
     loadingEl.classList.remove("hidden");
     gameoverEl.classList.add("hidden");
+    camErrorEl.classList.add("hidden");
     hud.classList.add("hidden");
+    practiceBadge.classList.add("hidden");
 
     loadingText.textContent = "Opening camera…";
     try {
@@ -60,32 +80,56 @@ const Game = (() => {
       });
       await video.play().catch(() => {});
     } catch (err) {
-      console.warn("Camera unavailable, using target practice mode:", err);
-      demoMode = true;
+      // no camera at all → the only case where simulated monsters are allowed
+      console.warn("Camera unavailable → Target Practice:", err);
+      loadingText.textContent = "No camera — starting Target Practice";
+      await new Promise((r) => setTimeout(r, 900));
+      return startPractice();
     }
 
-    if (!demoMode) {
-      loadingText.textContent = "Loading monster AI… (first time takes a moment)";
+    loadingText.textContent = "Loading monster AI… (first time takes a moment)";
+    try {
+      if (!model) {
+        modelLoading = modelLoading || cocoSsd.load({ base: "lite_mobilenet_v2" });
+        model = await modelLoading;
+      }
+    } catch (err) {
+      // camera works but detection can't load: tell the user, don't fake it
+      console.warn("Detection model failed to load:", err);
+      modelLoading = null;
+      loadingEl.classList.add("hidden");
+      camErrorEl.classList.remove("hidden");
+      return;
+    }
+
+    // segmentation makes monsters hug the person's silhouette; optional
+    if (!segmenter && typeof bodySegmentation !== "undefined") {
       try {
-        if (!model) {
-          modelLoading = modelLoading || cocoSsd.load({ base: "lite_mobilenet_v2" });
-          model = await modelLoading;
-        }
+        segLoading = segLoading || bodySegmentation.createSegmenter(
+          bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation,
+          { runtime: "tfjs", modelType: "general" }
+        );
+        segmenter = await segLoading;
       } catch (err) {
-        console.warn("Model failed to load, using target practice mode:", err);
-        demoMode = true;
+        console.warn("Segmentation unavailable, using soft-blend monsters:", err);
+        segLoading = null;
       }
     }
 
-    if (demoMode) {
-      stopStream();
-      video.srcObject = null;
-      loadingText.textContent = "No camera — starting Target Practice";
-      await new Promise((r) => setTimeout(r, 900));
-      seedDemoTargets();
-    }
+    beginRound();
+  }
 
-    // reset round
+  function startPractice() {
+    stopStream();
+    video.srcObject = null;
+    demoMode = true;
+    seedDemoTargets();
+    camErrorEl.classList.add("hidden");
+    practiceBadge.classList.remove("hidden");
+    beginRound();
+  }
+
+  function beginRound() {
     const s = Settings.get();
     Object.assign(state, {
       score: 0, kills: 0, shots: 0, hits: 0,
@@ -95,9 +139,10 @@ const Game = (() => {
     });
     tracker.reset();
     effects = [];
+    maskFresh = 0;
 
     video.style.filter = s.themeOn && !demoMode ? theme.camFilter : "none";
-    ambience.setTheme(theme, s.themeOn || demoMode); // demo mode always themed (it IS the backdrop)
+    ambience.setTheme(theme, s.themeOn || demoMode); // practice mode IS the backdrop
 
     resize();
     renderAmmo();
@@ -119,6 +164,8 @@ const Game = (() => {
     video.style.filter = "none";
     hud.classList.add("hidden");
     gameoverEl.classList.add("hidden");
+    camErrorEl.classList.add("hidden");
+    practiceBadge.classList.add("hidden");
   }
 
   function stopStream() {
@@ -131,6 +178,7 @@ const Game = (() => {
   /* ---------- detection ---------- */
 
   async function detectLoop() {
+    let tick = 0;
     while (running) {
       const now = performance.now();
       let detections = [];
@@ -142,13 +190,34 @@ const Game = (() => {
           const preds = await model.detect(video);
           const vw = video.videoWidth, vh = video.videoHeight;
           detections = preds
-            .filter((p) => p.class === "person" && p.score > 0.45)
+            .filter((p) => p.class === "person" && p.score > 0.4)
             .map((p) => ({
               x: p.bbox[0] / vw, y: p.bbox[1] / vh,
               w: p.bbox[2] / vw, h: p.bbox[3] / vh,
             }));
         } catch (_) { /* skip frame */ }
+
+        // refresh the person-pixel mask every other pass
+        if (segmenter && tick % 2 === 0) {
+          try {
+            const people = await segmenter.segmentPeople(video, { flipHorizontal: false });
+            if (people.length) {
+              const mask = await bodySegmentation.toBinaryMask(
+                people,
+                { r: 255, g: 255, b: 255, a: 255 },
+                { r: 0, g: 0, b: 0, a: 0 }
+              );
+              if (maskCanvas.width !== mask.width || maskCanvas.height !== mask.height) {
+                maskCanvas.width = mask.width;
+                maskCanvas.height = mask.height;
+              }
+              maskCtx.putImageData(mask, 0, 0);
+              maskFresh = now;
+            }
+          } catch (_) { /* keep last mask */ }
+        }
       }
+      tick++;
 
       const s = Settings.get();
       tracker.update(detections, now, {
@@ -156,7 +225,8 @@ const Game = (() => {
         respawnMs: s.respawnSec * 1000,
         onRespawn: (tr) => {
           SFX.respawn();
-          popup(trCenterX(tr), trTopY(tr), `${theme.monsterName} returned!`, "#ff7b7b");
+          const b = trackScreenBox(tr);
+          popup(b.x + b.w / 2, b.y, `${theme.monsterName} returned!`, "#ff7b7b");
         },
       });
 
@@ -165,7 +235,7 @@ const Game = (() => {
     }
   }
 
-  /* ---------- demo targets (no-camera fallback) ---------- */
+  /* ---------- demo targets (no-camera Target Practice) ---------- */
 
   function seedDemoTargets() {
     demoTargets = [];
@@ -192,13 +262,12 @@ const Game = (() => {
 
   function videoToScreen(nx, ny) {
     const W = gameCanvas.width, H = gameCanvas.height;
-    if (demoMode || !video.videoWidth) return { x: nx * W, y: ny * H, scale: 1 };
+    if (demoMode || !video.videoWidth) return { x: nx * W, y: ny * H };
     const vw = video.videoWidth, vh = video.videoHeight;
     const scale = Math.max(W / vw, H / vh);
     return {
       x: nx * vw * scale + (W - vw * scale) / 2,
       y: ny * vh * scale + (H - vh * scale) / 2,
-      scale,
     };
   }
 
@@ -207,9 +276,6 @@ const Game = (() => {
     const b = videoToScreen(tr.smooth.x + tr.smooth.w, tr.smooth.y + tr.smooth.h);
     return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
   }
-
-  const trCenterX = (tr) => trackScreenBox(tr).x + trackScreenBox(tr).w / 2;
-  const trTopY = (tr) => trackScreenBox(tr).y;
 
   /* ---------- render ---------- */
 
@@ -245,80 +311,126 @@ const Game = (() => {
 
   function drawMonster(tr, now) {
     const box = trackScreenBox(tr);
-    const cx = box.x + box.w / 2;
-    const size = Math.max(48, Math.min(box.w, box.h * 0.6));
-    tr.bob += 0.05;
-    const bobY = Math.sin(tr.bob) * size * 0.04;
-    // monster face sits over the person's upper body
-    const cy = box.y + box.h * 0.22 + bobY;
 
     if (tr.state === "dead") {
-      // respawn countdown ring where the monster fell
-      const s = Settings.get();
-      const total = s.respawnSec * 1000;
-      const p = Math.min(1, (now - tr.diedAt) / total);
-      gctx.save();
-      gctx.globalAlpha = 0.85;
-      gctx.beginPath();
-      gctx.arc(cx, cy, size * 0.35, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p);
-      gctx.strokeStyle = "rgba(255,255,255,0.9)";
-      gctx.lineWidth = 4;
-      gctx.stroke();
-      gctx.font = `700 ${Math.round(size * 0.22)}px sans-serif`;
-      gctx.textAlign = "center";
-      gctx.fillStyle = "rgba(255,255,255,0.9)";
-      gctx.fillText(`${Math.ceil((total - (now - tr.diedAt)) / 1000)}s`, cx, cy + size * 0.08);
-      gctx.font = `${Math.round(size * 0.5)}px sans-serif`;
-      gctx.globalAlpha = 0.35;
-      gctx.fillText("💀", cx, cy - size * 0.45);
-      gctx.restore();
+      drawRespawnRing(tr, box, now);
       return;
     }
 
-    const spawnP = Math.min(1, (now - tr.spawnedAt) / 400); // pop-in
+    const spawnP = Math.min(1, (now - tr.spawnedAt) / 400); // fade/pop in
     const flash = tr.hitFlash > now;
 
     gctx.save();
-    gctx.translate(cx, cy);
-    gctx.scale(spawnP, spawnP);
+    gctx.globalAlpha = spawnP;
 
-    // aura
-    const g = gctx.createRadialGradient(0, 0, size * 0.1, 0, 0, size * 0.85);
-    g.addColorStop(0, theme.glow.replace(/[\d.]+\)$/, "0.35)"));
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    gctx.fillStyle = g;
-    gctx.beginPath();
-    gctx.arc(0, 0, size * 0.85, 0, Math.PI * 2);
-    gctx.fill();
-
-    // body highlight around the person
-    gctx.strokeStyle = flash ? "rgba(255,255,255,0.95)" : theme.glow;
-    gctx.lineWidth = flash ? 5 : 3;
-    gctx.setLineDash([10, 8]);
-    roundRect(gctx, box.x - cx, box.y - cy, box.w, box.h, 16);
-    gctx.stroke();
-    gctx.setLineDash([]);
-
-    // the monster
-    gctx.font = `${Math.round(size)}px sans-serif`;
-    gctx.textAlign = "center";
-    gctx.textBaseline = "middle";
-    if (flash) {
-      gctx.filter = "brightness(2.5)";
-      gctx.translate((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8);
+    if (demoMode) {
+      MonsterArt.drawDemoBody(gctx, theme, box, state.elapsed, tr.id);
+      if (flash) flashBox(box);
+    } else {
+      drawPersonMonster(tr, box, flash);
+      MonsterArt.drawFeatures(gctx, theme, box, state.elapsed, tr.id);
     }
-    gctx.fillText(theme.monster, 0, 0);
-    gctx.filter = "none";
-    if (theme.monsterEmblem) {
-      gctx.font = `${Math.round(size * 0.34)}px sans-serif`;
-      gctx.fillStyle = theme.glow;
-      gctx.fillText(theme.monsterEmblem, 0, -size * 0.72);
-    }
+
     gctx.restore();
+    drawHealthBar(tr, box);
+  }
 
-    // health bar
-    const bw = Math.max(60, size * 1.1), bh = 7;
-    const bx = cx - bw / 2, by = cy - size * 0.75;
+  /* The heart of the game: turn the captured person into the monster.
+     Their own pixels are masked out, tinted with monster skin, shaded,
+     and drawn back over them with a themed glow. */
+  function drawPersonMonster(tr, box, flash) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw) return;
+
+    // person's region in video pixels (clamped)
+    let sx = tr.smooth.x * vw, sy = tr.smooth.y * vh;
+    let sw = tr.smooth.w * vw, sh = tr.smooth.h * vh;
+    sx = Math.max(0, sx); sy = Math.max(0, sy);
+    sw = Math.min(sw, vw - sx); sh = Math.min(sh, vh - sy);
+    if (sw < 4 || sh < 4) return;
+
+    // build the cutout at capped resolution for phone performance
+    const cap = 320;
+    const cs = Math.min(1, cap / Math.max(box.w, box.h));
+    const cw = Math.max(4, Math.round(box.w * cs));
+    const ch = Math.max(4, Math.round(box.h * cs));
+    cutCanvas.width = cw; cutCanvas.height = ch;
+
+    const maskUsable = maskFresh && performance.now() - maskFresh < 1500;
+    if (maskUsable) {
+      // person silhouette from the segmentation mask
+      const mx = maskCanvas.width / vw, my = maskCanvas.height / vh;
+      cutCtx.drawImage(maskCanvas, sx * mx, sy * my, sw * mx, sh * my, 0, 0, cw, ch);
+    } else {
+      // soft body-shaped blend while the mask warms up / if it failed
+      const g = cutCtx.createRadialGradient(cw / 2, ch * 0.45, Math.min(cw, ch) * 0.18, cw / 2, ch * 0.5, Math.max(cw, ch) * 0.55);
+      g.addColorStop(0, "rgba(0,0,0,1)");
+      g.addColorStop(0.75, "rgba(0,0,0,0.85)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      cutCtx.fillStyle = g;
+      cutCtx.fillRect(0, 0, cw, ch);
+    }
+
+    // keep only the person's pixels inside the silhouette
+    cutCtx.globalCompositeOperation = "source-in";
+    cutCtx.drawImage(video, sx, sy, sw, sh, 0, 0, cw, ch);
+
+    // monster skin: flat tint + vertical shading, only on person pixels
+    cutCtx.globalCompositeOperation = "source-atop";
+    cutCtx.fillStyle = theme.skinTint;
+    cutCtx.fillRect(0, 0, cw, ch);
+    const shade = cutCtx.createLinearGradient(0, 0, 0, ch);
+    shade.addColorStop(0, "rgba(0,0,0,0)");
+    shade.addColorStop(1, theme.skinShade);
+    cutCtx.fillStyle = shade;
+    cutCtx.fillRect(0, 0, cw, ch);
+    if (flash) {
+      cutCtx.fillStyle = "rgba(255,255,255,0.55)";
+      cutCtx.fillRect(0, 0, cw, ch);
+    }
+    cutCtx.globalCompositeOperation = "source-over";
+
+    // paint the monster back over the person, glowing
+    gctx.save();
+    gctx.shadowColor = theme.glow;
+    gctx.shadowBlur = 24;
+    gctx.drawImage(cutCanvas, 0, 0, cw, ch, box.x, box.y, box.w, box.h);
+    gctx.restore();
+  }
+
+  function flashBox(box) {
+    gctx.fillStyle = "rgba(255,255,255,0.35)";
+    gctx.fillRect(box.x, box.y, box.w, box.h);
+  }
+
+  function drawRespawnRing(tr, box, now) {
+    const s = Settings.get();
+    const total = s.respawnSec * 1000;
+    const p = Math.min(1, (now - tr.diedAt) / total);
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h * 0.25;
+    const r = Math.max(20, Math.min(box.w, box.h) * 0.3);
+    gctx.save();
+    gctx.globalAlpha = 0.85;
+    gctx.beginPath();
+    gctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p);
+    gctx.strokeStyle = "rgba(255,255,255,0.9)";
+    gctx.lineWidth = 4;
+    gctx.stroke();
+    gctx.font = `700 ${Math.round(r * 0.6)}px sans-serif`;
+    gctx.textAlign = "center";
+    gctx.fillStyle = "rgba(255,255,255,0.9)";
+    gctx.fillText(`${Math.ceil((total - (now - tr.diedAt)) / 1000)}s`, cx, cy + r * 0.22);
+    gctx.font = `${Math.round(r)}px sans-serif`;
+    gctx.globalAlpha = 0.35;
+    gctx.fillText("💀", cx, cy - r * 1.3);
+    gctx.restore();
+  }
+
+  function drawHealthBar(tr, box) {
+    const bw = Math.max(60, box.w * 0.6), bh = 7;
+    const bx = box.x + box.w / 2 - bw / 2;
+    const by = box.y - 16;
     gctx.fillStyle = "rgba(0,0,0,0.55)";
     roundRect(gctx, bx, by, bw, bh, 4);
     gctx.fill();
@@ -417,21 +529,20 @@ const Game = (() => {
     effects.push({ kind: "ring", x, y, life: 0.25, r: 4 });
 
     // hit test alive monsters (smallest box wins → nearest target)
-    let target = null;
+    let target = null, targetBox = null;
     for (const tr of tracker.alive()) {
       const b = trackScreenBox(tr);
       const pad = 14; // forgiving hitbox for fingers
       if (x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad) {
-        if (!target || b.w * b.h < trackScreenBox(target).w * trackScreenBox(target).h) target = tr;
+        if (!target || b.w * b.h < targetBox.w * targetBox.h) { target = tr; targetBox = b; }
       }
     }
     if (!target) return;
 
     state.hits++;
-    const b = trackScreenBox(target);
+    const b = targetBox;
     const headshot = y < b.y + b.h * 0.25;
-    const dmg = 1;
-    target.hp -= dmg;
+    target.hp -= 1;
     target.hitFlash = performance.now() + 120;
 
     if (target.hp <= 0) {
@@ -495,6 +606,14 @@ const Game = (() => {
     shoot(e.clientX, e.clientY);
   });
   reloadBtn.addEventListener("click", reload);
+  document.getElementById("btn-retry-detect").addEventListener("click", () => {
+    stopStream();
+    start(lastModeKey);
+  });
+  document.getElementById("btn-practice").addEventListener("click", () => {
+    SFX.ui();
+    startPractice();
+  });
 
-  return { start, stop, get lastMode() { return theme; } };
+  return { start, stop, get lastModeKey() { return lastModeKey; } };
 })();

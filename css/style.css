@@ -400,9 +400,29 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 16px;
 }
 .panel h2 { letter-spacing: 3px; }
+.panel-text { color: var(--muted); font-size: 14px; line-height: 1.55; }
 .go-stats { display: flex; justify-content: space-around; margin: 6px 0 10px; }
 .go-stats span { font-size: 26px; font-weight: 900; color: var(--gold); display: block; }
 .go-stats small { color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+
+.practice-badge {
+  position: absolute;
+  top: calc(64px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  background: rgba(255, 154, 61, 0.18);
+  border: 1px solid rgba(255, 154, 61, 0.5);
+  color: #ffc94d;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  white-space: nowrap;
+}
 
 /* ============ Showdown ============ */
 .showdown-intro {
